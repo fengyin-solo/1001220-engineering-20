@@ -99,10 +99,17 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      // 后端动作接口统一收 values 包络，直接传 { action } 会被当成缺字段而动作不生效
+      body: JSON.stringify({ values: { action } }),
     })
     if (!response.ok) {
       throw new Error('事故记录动作未生效，请稍后重试')
+    }
+    // 业务上不允许的动作会以 200 + ok:false 返回，message 里写了原因，要原样露给用户
+    const result = (await response.json()) as { ok?: boolean; message?: string }
+    if (!result.ok) {
+      errorMessage.value = result.message || '事故记录动作未生效'
+      return
     }
     await reload()
   } catch (error) {

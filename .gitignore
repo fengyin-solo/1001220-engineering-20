@@ -85,3 +85,6 @@ desktop.ini
 *.db
 *.pid
 *.seed
+
+# ===== 本地一键启动脚本运行目录（日志与 PID） =====
+.run/

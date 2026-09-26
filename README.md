@@ -18,32 +18,75 @@
 │   ├── app/routers/          每个业务模块一组接口
 │   ├── app/services/         业务规则与状态流转
 │   └── app/store.py          内存数据仓库与示例数据
+├── scripts/
+│   ├── start.sh              一条命令拉起前后端（依赖/端口预检查）
+│   └── check_accident_flow.py 事故上报→损失核定→保险理赔 链路检查
+├── Makefile                  install / build / start / check 入口
 ├── .gitignore
-└── docker-compose.yml
+└── .env.example
 ```
 
-## 启动
+## 本地启动流程（推荐）
 
-### 后端
+事故记录链路（事故上报 → 损失核定 → 保险理赔）需要前后端一起验，统一用 Makefile 收口：
 
 ```bash
-cd backend
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-./run.sh
+make install   # 首次：后端建 venv 装依赖、前端 npm install
+make build     # 前端 vue-tsc 类型检查并构建到 frontend/dist
+make start     # 一条命令同时拉起后端 :8000 与前端 :5173（构建产物模式）
 ```
 
-健康检查：`curl http://127.0.0.1:8000/api/health`
+启动成功后：
 
-### 前端
+- 前端：<http://127.0.0.1:5173/>，事故记录页：<http://127.0.0.1:5173/accident>
+- 后端：<http://127.0.0.1:8000/api/health>
+- 前端的 `/api` 请求由 vite preview 代理到后端，无需改地址
+- 日志在 `.run/backend.log`、`.run/frontend.log`，`Ctrl+C` 同时停两端；也可 `make stop`
+
+启动前的预检查会直接报错退出（不会留下半截进程）：
+
+- 缺少 `python3` / `npm`：提示先安装运行时
+- `backend/.venv` 或 `frontend/node_modules` 缺失：提示先执行 `make install`
+- `frontend/dist` 不存在：提示先执行 `make build`
+- `8000` / `5173` 被占用：提示端口冲突，并尽量打印占用进程信息
+
+> 数据同步：后端目前是内存数据仓库，每次启动都会按 `backend/app/seed.py`
+> 重新写入示例数据，因此改完种子数据只需重启后端（重新 `make start`）即生效，
+> 不存在忘记同步数据库的问题。
+
+### 事故链路联调与理赔结论核对
+
+示例数据预置了四条事故，状态覆盖 **待上报 → 已上报 → 理赔中 → 已结案**，
+每条都带事故编号、事故类型、损失金额，已结案一条带最终理赔结论（见
+`backend/app/seed.py` 的 `accident` 表）。
+
+- 页面联调：打开事故记录页，对「待上报」记录依次点
+  **上报事故 → 启动理赔 → 结案归档**；列表与页脚会实时反映状态和后端返回的原因。
+- 可复现检查：服务起着时，另开终端执行
+
+  ```bash
+  make check
+  ```
+
+  脚本（`scripts/check_accident_flow.py`）会：
+  1. 校验示例数据覆盖四个状态且事故编号/事故类型/损失金额齐全、已结案记录带理赔结论；
+  2. 通过接口新建一条事故（固定编号 `ACCI-CHECK`、初始损失 20000），依次执行
+     上报事故、启动理赔（核定损失 18000）、结案归档（写入理赔结论）；
+  3. 再用 GET 详情、`status=已结案` 列表过滤、按编号检索三个读接口，
+     核对状态、核定金额、理赔结论与动作返回完全一致。
+
+  全部通过以退出码 0 结束；任一项不一致会打印 `✗` 明细并以非 0 退出，可直接进 CI。
+  后端不在默认地址时可用 `API_BASE=http://host:port make check` 覆盖。
+
+### 分开启动（热更新调试）
 
 ```bash
-cd frontend
-npm install
-npm run dev
+make backend    # backend/run.sh：自动建 venv、装依赖后跑 uvicorn :8000
+make frontend   # frontend：vite dev server :5173，/api 代理到 :8000
 ```
 
-前端默认监听 `http://127.0.0.1:5173/`，dev server 不会自动打开浏览器，
-需要自己访问。`/api` 由 vite 代理到后端 `http://127.0.0.1:8000`。
+后端健康检查：`curl http://127.0.0.1:8000/api/health`。
+dev server 不会自动打开浏览器，`/api` 同样代理到 `http://127.0.0.1:8000`。
 
 ## 业务模块
 
@@ -65,7 +108,7 @@ npm run dev
 | 运输费用 | `cost` | 费用记录 | 费用编号、关联任务、费用类别 |
 | 委托方管理 | `client2` | 委托方 | 委托方编号、委托方名称、企业类别 |
 | 出车检查 | `checkin` | 检查记录 | 检查编号、检查车辆、检查日期 |
-| 事故记录 | `accident` | 事故记录 | 事故编号、关联任务、事故类型 |
+| 事故记录 | `accident` | 事故记录 | 事故编号、事故类型、损失金额、保险理赔 |
 | 途中核查 | `roadcheck` | 途中核查 | 核查编号、关联调度、核查时间 |
 | 车厢清洗 | `clean2` | 清洗记录 | 清洗编号、清洗车辆、清洗方式 |
 | 合作合同 | `contract2` | 运输合同 | 合同编号、签约双方、合同类型 |
