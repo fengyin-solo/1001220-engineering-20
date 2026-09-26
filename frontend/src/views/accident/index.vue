@@ -71,9 +71,9 @@ type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/accident'
 const columns = ["事故编号", "关联任务", "事故类型", "发生时间", "事故描述", "损失金额", "保险理赔", "事故状态"]
-const actions = ["上报事故", "启动理赔", "结案归档"]
-const statuses = ["待上报", "已上报", "理赔中", "已结案"]
-const stats = [{"label": "待上报事故", "value": 0}, {"label": "理赔中事故", "value": 0}, {"label": "已结案事故", "value": 0}]
+const actions = ["上报事故", "损失核定", "启动理赔", "理赔到账"]
+const statuses = ["待上报", "已上报", "待理赔", "理赔中", "已理赔"]
+const stats = [{"label": "待上报事故", "value": 0}, {"label": "待理赔事故", "value": 0}, {"label": "已理赔事故", "value": 0}]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
@@ -96,13 +96,31 @@ function openCreate() {
 
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
+  // 后端动作接口的入参统一包在 values 里；核损与理赔到账自动带上金额与结论，
+  // 这样页面按钮也能把「上报 -> 核损 -> 理赔」整条链路点通。
+  const values: Record<string, string | number> = { action }
+  if (action === '损失核定' && row['损失金额'] != null && row['损失金额'] !== '') {
+    values['损失金额'] = row['损失金额']
+  }
+  if (action === '理赔到账') {
+    const loss = Number(row['损失金额'])
+    if (Number.isFinite(loss) && loss > 0) {
+      values['损失金额'] = loss
+      values['赔付金额'] = Math.round(loss * 0.8 * 100) / 100
+    }
+    values['理赔结论'] = '保险已赔付'
+  }
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values }),
     })
     if (!response.ok) {
       throw new Error('事故记录动作未生效，请稍后重试')
+    }
+    const payload = await response.json()
+    if (payload.ok === false) {
+      throw new Error(payload.message || '事故记录动作未生效')
     }
     await reload()
   } catch (error) {

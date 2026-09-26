@@ -15,10 +15,11 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
-    port: 5173,
-    // 关掉自动打开页面：起服务时只打印地址，不拉起浏览器
+    // 端口由环境变量覆盖；strictPort 保证端口被占用时直接失败，
+    // 避免 dev-up 脚本对着一个没起来的服务做健康检查。
+    port: process.env.VITE_PORT ? Number(process.env.VITE_PORT) : 5173,
     open: false,
-    strictPort: false,
+    strictPort: true,
     proxy: {
       '/api': {
         target: proxyTarget,

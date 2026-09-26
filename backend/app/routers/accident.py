@@ -1,4 +1,4 @@
-"""事故记录接口：维护事故记录，覆盖上报事故、启动理赔、结案归档等动作。"""
+"""事故记录接口：覆盖事故上报、损失核定与保险理赔（启动理赔 / 理赔到账）等动作。"""
 from __future__ import annotations
 
 from typing import Any
@@ -13,13 +13,13 @@ router = APIRouter(prefix="/api/accident", tags=["事故记录"])
 service = AccidentService()
 
 LIST_FIELDS = ["事故编号", "关联任务", "事故类型", "发生时间", "事故描述", "损失金额", "保险理赔", "事故状态"]
-STATUSES = ["待上报", "已上报", "理赔中", "已结案"]
+STATUSES = ["待上报", "已上报", "待理赔", "理赔中", "已理赔"]
 
 
 @router.get("", response_model=PageResult[dict])
 def list_entries(
     keyword: str | None = Query(default=None, description="按事故编号检索"),
-    status: str | None = Query(default=None, description="待上报、已上报、理赔中、已结案"),
+    status: str | None = Query(default=None, description="待上报、已上报、待理赔、理赔中、已理赔"),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
@@ -28,6 +28,16 @@ def list_entries(
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出事故记录清单：返回当前过滤条件下的全量数据。
+
+    该静态路径必须排在 /{entry_id} 之前注册，否则 "export" 会被当成 entry_id 解析成 422。
+    """
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "accident", "total": total, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -50,16 +60,14 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条事故记录执行上报事故、启动理赔、结案归档；不允许的动作会被拦下并说明原因。"""
-    action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    """对单条事故记录执行上报事故、损失核定、启动理赔、理赔到账；不允许的动作会被拦下并说明原因。
+
+    除 action 外，业务字段放在 values 里透传给服务层，例如：
+    损失核定可带 {"action": "损失核定", "values": {"损失金额": 12000}}；
+    理赔到账可带 {"action": "理赔到账", "values": {"赔付金额": 9600, "理赔结论": "保险已赔付"}}。
+    """
+    action = str(payload.values.pop("action", "") or "").strip()
+    entry, message = service.run_action(entry_id, action, payload.values)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出事故记录清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "accident", "total": total, "items": items}

@@ -85,3 +85,7 @@ desktop.ini
 *.db
 *.pid
 *.seed
+
+# ===== 本地联调（scripts/dev-up.sh 运行目录）=====
+.run/
+backend/.bootstrap/
